@@ -13,3 +13,6 @@ eval/eval_experiments_and_configs/mpe:MaterialTransport-v0/experiments
 __pycache__/
 pretrained_models/
 src/pretrained/
+scripts/material_transport_coalition_visuals/4/
+scripts/coalition_visuals/4/
+**/mpe.egg-info/
