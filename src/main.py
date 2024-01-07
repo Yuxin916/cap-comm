@@ -19,6 +19,19 @@ import time
 from run import run
 import argparse
 
+"""
+# Example usage:
+with 
+alg_yaml=mappo_gnn 
+env_yaml=gymma 
+batch_size_run=16 # 多少个环境并行
+batch_size=32 
+buffer_size=32 # buffer里存了多少个episode
+env_args.time_limit=1000 # 环境需要在多少个step就被truncated - 用于TimeLimitWrapper - 但其实环境config里自带max_episode_steps
+env_args.key="robotarium_gym:HeterogeneousSensorNetwork-v0" # 环境的key - gym.make(key)
+t_max=20500000 # 总共训练多少个step
+which_seed="seed_1"
+"""
 SETTINGS['CAPTURE_MODE'] = "fd" # set to "no" if you want to see stdout/stderr in console
 logger = get_logger()
 
