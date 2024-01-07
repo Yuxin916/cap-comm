@@ -4,6 +4,7 @@ from types import SimpleNamespace as SN
 import time
 
 class EpisodeBatch:
+    # 用于存储episode的数据
     def __init__(self,
                  scheme,
                  groups,
@@ -12,6 +13,14 @@ class EpisodeBatch:
                  data=None,
                  preprocess=None,
                  device="cpu"):
+        """
+        scheme是一个字典，包含了state,obs,actions,adj_matrix,avail_actions,reward,terminated等信息
+        groups是一个字典，包含了agents的数量
+        batch_size: buffer可以存储的episode数量
+        max_seq_length: 每个episode的最大长度
+        preprocess: 预处理的动作onehot
+        device: buffer的存储设备
+        """
         self.scheme = scheme.copy()
         self.groups = groups
         self.batch_size = batch_size
@@ -22,13 +31,17 @@ class EpisodeBatch:
         if data is not None:
             self.data = data
         else:
+            # 初始化data为一个SimpleNamespace，包含了transition_data和episode_data
             self.data = SN()
             self.data.transition_data = {}
             self.data.episode_data = {}
+
+            # transition_data的维度是[batch_size, max_seq_length, *shape]
             self._setup_data(self.scheme, self.groups, batch_size, max_seq_length, self.preprocess)
 
     def _setup_data(self, scheme, groups, batch_size, max_seq_length, preprocess):
         if preprocess is not None:
+            # 更新原来scheme中，添加预处理的动作onehot
             for k in preprocess:
                 assert k in scheme
                 new_k = preprocess[k][0]
@@ -48,12 +61,16 @@ class EpisodeBatch:
                 if "episode_const" in self.scheme[k]:
                     self.scheme[new_k]["episode_const"] = self.scheme[k]["episode_const"]
 
+        # 确保 scheme 中没有使用保留关键字 "filled"
         assert "filled" not in scheme, '"filled" is a reserved key for masking.'
+        # 向 scheme 添加 "filled" 键，其值包含形状 (1,) 和数据类型 th.long
         scheme.update({
             "filled": {"vshape": (1,), "dtype": th.long},
         })
 
+        # 遍历 scheme 中的每个字段
         for field_key, field_info in scheme.items():
+            # 验证每个字段是否定义了 vshape
             assert "vshape" in field_info, "Scheme must define vshape for {}".format(field_key)
             vshape = field_info["vshape"]
             episode_const = field_info.get("episode_const", False)
@@ -69,6 +86,8 @@ class EpisodeBatch:
             else:
                 shape = vshape
 
+            # 如果字段标记为 episode_const，则数据存储在 self.data.episode_data 中；
+            # 否则存储在 self.data.transition_data 中 【都是transition data】
             if episode_const:
                 self.data.episode_data[field_key] = th.zeros((batch_size, *shape), dtype=dtype, device=self.device)
             else:
@@ -205,10 +224,21 @@ class EpisodeBatch:
 
 
 class ReplayBuffer(EpisodeBatch):
+    # 继承EpisodeBatch类
+    # 用于存储所有的off-policy样本，也即EpisodeBatch类变量的样本会持续地补充到ReplayBuffer(EpisodeBatch)类的变量中
     def __init__(self, scheme, groups, buffer_size, max_seq_length, preprocess=None, device="cpu"):
         super(ReplayBuffer, self).__init__(scheme, groups, buffer_size, max_seq_length, preprocess=preprocess, device=device)
+        """
+        scheme是一个字典，包含了state,obs,actions,adj_matrix,avail_actions,reward,terminated等信息
+        groups是一个字典，包含了agents的数量
+        buffer_size: buffer可以存储的episode数量
+        max_seq_length: 每个episode的最大长度
+        preprocess: 预处理的动作onehot
+        device: buffer的存储设备
+        """
         self.buffer_size = buffer_size  # same as self.batch_size but more explicit
         self.buffer_index = 0
+        # 此时buffer中有多少个episode的有效样本
         self.episodes_in_buffer = 0
 
     def insert_episode_batch(self, ep_batch):
@@ -232,6 +262,7 @@ class ReplayBuffer(EpisodeBatch):
         return self.episodes_in_buffer >= batch_size
 
     def sample(self, batch_size):
+        # 从buffer中取出batch_size个episode的样本用于训练
         assert self.can_sample(batch_size)
         if self.episodes_in_buffer == batch_size:
             return self[:batch_size]

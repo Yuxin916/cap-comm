@@ -16,7 +16,6 @@ from controllers import REGISTRY as mac_REGISTRY
 from components.episode_buffer import ReplayBuffer
 from components.transforms import OneHot
 
-
 def run(_run, config, _log):
     # hack to be able to modify Sacred config
     _config = deepcopy(config)
@@ -84,11 +83,17 @@ def evaluate_sequential(args, runner):
 
 
 def run_sequential(args, logger):
-
-    # Init runner so we can get env info
+    """
+    这里的args读取的是
+        - 算法.yaml,
+        - default.yaml
+        - gymma.yaml文件
+    中的参数，还包含命令行传入/override的参数
+    """
+    # Init runner so we can get env info 环境运行器 - 获取环境信息&多进程 - parallel runner
     runner = r_REGISTRY[args.runner](args=args, logger=logger)
 
-    # Set up schemes and groups here
+    # 从env_info中获取环境信息
     env_info = runner.get_env_info()
     args.n_agents = env_info["n_agents"]
     args.n_actions = env_info["n_actions"]
@@ -109,29 +114,35 @@ def run_sequential(args, logger):
         "terminated": {"vshape": (1,), "dtype": th.uint8},
     }
     groups = {"agents": args.n_agents}
+
+    # 给动作空间添加一个onehot的预处理
     preprocess = {"actions": ("actions_onehot", [OneHot(out_dim=args.n_actions)])}
 
+    # 初始化buffer
     buffer = ReplayBuffer(
-        scheme,
-        groups,
-        args.buffer_size,
-        env_info["episode_limit"] + 1,
-        preprocess=preprocess,
-        device="cpu" if args.buffer_cpu_only else args.device,
+        scheme,  # scheme是一个字典，包含了state,obs,actions等如上信息
+        groups,  # groups是一个字典，包含了agents的数量
+        args.buffer_size, # buffer可以存储的episode数量
+        env_info["episode_limit"] + 1,  # 每个episode的最大长度 (#TODO: 这里是1000,而不是80
+        preprocess=preprocess,  # 预处理的动作onehot
+        device="cpu" if args.buffer_cpu_only else args.device,  # buffer的存储设备
     )
 
-    # Setup multiagent controller here
+    # mac有basic, no_share和maddpg三种 智能体控制器 #TODO：MAT的接入需要添加一个mac
+    # 原文使用的是mappo的share版本，即basic_mac
+    # 一个重要属性就是智能体对象mac.agent - actor网络
     mac = mac_REGISTRY[args.mac](buffer.scheme, groups, args)
 
-    # Give runner the scheme
+    # Give runner the scheme 环境运行器 初始化
     runner.setup(scheme=scheme, groups=groups, preprocess=preprocess, mac=mac)
 
-    # Learner
+    # Learner 智能体学习器
     learner = le_REGISTRY[args.learner](mac, buffer.scheme, logger, args)
 
     if args.use_cuda:
         learner.cuda()
 
+    # 加载模型
     if args.checkpoint_path != "":
 
         timesteps = []
@@ -175,8 +186,9 @@ def run_sequential(args, logger):
             logger.console_logger.info("Finished Evaluation")
             return
 
-    # start training
+    # 开始训练
     episode = 0
+    # 每隔一定步数进行一次测试
     last_test_T = -args.test_interval - 1
     last_log_T = 0
     model_save_time = 0
@@ -186,25 +198,34 @@ def run_sequential(args, logger):
 
     logger.console_logger.info("Beginning training for {} timesteps".format(args.t_max))
 
+    # 按照训练步数进行训练
     while runner.t_env <= args.t_max:
 
-        # Run for a whole episode at a time
+        # 运行一个episode,更新了log，返回了所有并行环境的episode batch
         episode_batch = runner.run(test_mode=False)
+
+        # 把所有环境下的episode batch存入buffer
         buffer.insert_episode_batch(episode_batch)
 
+        # 判断此刻buffer里面储存的episode数量是否足够进行训练，这里的args.batch_size是指拿来训练的episode数量
         if buffer.can_sample(args.batch_size):
+            # 从buffer中采样出args.batch_size个episode
             episode_sample = buffer.sample(args.batch_size)
 
             # Truncate batch to only filled timesteps
+            # 从episode_sample中把所有episode的长度截断到最长的episode长度 在这里从1001截断到了82
             max_ep_t = episode_sample.max_t_filled()
             episode_sample = episode_sample[:, :max_ep_t]
 
+            # 转移到设备上
             if episode_sample.device != args.device:
                 episode_sample.to(args.device)
 
+            # 更新learner！
             learner.train(episode_sample, runner.t_env, episode)
 
         # Execute test runs once in a while
+        # 每隔一定步数进行一次测试
         n_test_runs = max(1, args.test_nepisode // runner.batch_size)
         if (runner.t_env - last_test_T) / args.test_interval >= 1.0:
 
@@ -223,6 +244,7 @@ def run_sequential(args, logger):
             for _ in range(n_test_runs):
                 runner.run(test_mode=True)
 
+        # 每隔一定步数进行一次保存
         if args.save_model and (
             runner.t_env - model_save_time >= args.save_model_interval
             or model_save_time == 0
@@ -231,7 +253,6 @@ def run_sequential(args, logger):
             save_path = os.path.join(
                 args.local_results_path, "models", args.unique_token, str(runner.t_env)
             )
-            # "results/models/{}".format(unique_token)
             os.makedirs(save_path, exist_ok=True)
             logger.console_logger.info("Saving models to {}".format(save_path))
 
@@ -239,6 +260,7 @@ def run_sequential(args, logger):
             # use appropriate filenames to do critics, optimizer states
             learner.save_models(save_path)
 
+        # 记录总共跑了多少个episode
         episode += args.batch_size_run
 
         if (runner.t_env - last_log_T) >= args.log_interval:

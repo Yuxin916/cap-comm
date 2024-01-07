@@ -56,6 +56,8 @@ class PPOLearner:
         mask = batch["filled"][:, :-1].float()
         mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
         actions = actions[:, :-1]
+
+        # 是否标准化reward
         if self.args.standardise_rewards:
             self.rew_ms.update(rewards)
             rewards = (rewards - self.rew_ms.mean) / th.sqrt(self.rew_ms.var)
@@ -91,7 +93,10 @@ class PPOLearner:
             mac_out = th.stack(mac_out, dim=1)  # Concat over time
 
             pi = mac_out
-            advantages, critic_train_stats = self.train_critic_sequential(self.critic, self.target_critic, batch, rewards,
+            advantages, critic_train_stats = self.train_critic_sequential(self.critic,
+                                                                          self.target_critic,
+                                                                          batch,
+                                                                          rewards,
                                                                           critic_mask)
             advantages = advantages.detach()
             # Calculate policy grad with mask

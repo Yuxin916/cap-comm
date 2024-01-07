@@ -56,6 +56,7 @@ class BasicMAC:
                                                             avail_actions[bs],
                                                             t_env,
                                                             test_mode=test_mode)
+        # 没有terminate的环境里所有的agent的动作 离散动作分类 [env_num, agent_num]
         return chosen_actions
 
     def forward(self, ep_batch, t, test_mode=False):

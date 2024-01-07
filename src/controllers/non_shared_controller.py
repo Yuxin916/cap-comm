@@ -1,5 +1,5 @@
 from modules.agents import REGISTRY as agent_REGISTRY
-from components.action_selectors import REGISTRY as action_REGISTRY
+from modules.action_selector import REGISTRY as action_REGISTRY
 import torch as th
 
 class NonSharedMAC:
