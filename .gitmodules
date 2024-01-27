@@ -1,3 +1,4 @@
 [submodule "MARBLER-CA"]
 	path = MARBLER-CA
 	url = git@github.com:Yuxin916/MARBLER-CA.git
+	branch = main
