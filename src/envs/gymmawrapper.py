@@ -121,7 +121,7 @@ class _GymmaWrapper(MultiAgentEnv):
             for o in self._obs
         ]
 
-        if ('n' in info.keys()):
+        if 'n' in info.keys():
             return float(sum(reward)), all(done), info['n'][0]
         else:
             return float(sum(reward)), all(done), info

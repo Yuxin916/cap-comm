@@ -11,6 +11,7 @@ combination_length = 4
 
 combinations = list(itertools.combinations_with_replacement(letters, combination_length))
 
+# binned robot capabilities into small, medium, and large sensing radii with bin ranges
 ranges = {
         's' :[0.2, 0.34],
         'm': [0.33, 0.47],

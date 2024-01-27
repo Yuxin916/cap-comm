@@ -23,7 +23,7 @@ class PPOLearner:
         self.agent_params = list(mac.parameters())
         self.agent_optimiser = Adam(params=self.agent_params, lr=args.lr)
 
-        if(args.use_gnn):
+        if args.use_gnn:
             self.critic = self.mac.critic
         else:
             self.critic = critic_resigtry[args.critic_type](scheme, args)
@@ -49,13 +49,13 @@ class PPOLearner:
 
     def train(self, batch: EpisodeBatch, t_env: int, episode_num: int):
         # Get the relevant quantities
-
-        rewards = batch["reward"][:, :-1]
-        actions = batch["actions"][:, :]
-        terminated = batch["terminated"][:, :-1].float()
-        mask = batch["filled"][:, :-1].float()
+        # transition_data的维度是[batch_size, max_seq_length, *shape]
+        # 这里的batch size是Number of episodes to train on
+        rewards = batch["reward"][:, :-1]  # [batch_size, max_seq_length+1，1]
+        actions = batch["actions"][:, :-1]  # [batch_size, max_seq_length+1，num_agents, 1]
+        terminated = batch["terminated"][:, :-1].float()  # [batch_size, max_seq_length+1，1]
+        mask = batch["filled"][:, :-1].float()  # [batch_size, max_seq_length+1，1]
         mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
-        actions = actions[:, :-1]
 
         # 是否标准化reward
         if self.args.standardise_rewards:
@@ -72,6 +72,7 @@ class PPOLearner:
 
         critic_mask = mask.clone()
 
+        # 旧策略的动作概率 [batch_size, max_seq_length+1, num_agents, action_dim]
         old_mac_out = []
         self.old_mac.init_hidden(batch.batch_size)
         for t in range(batch.max_seq_length - 1):
@@ -79,32 +80,39 @@ class PPOLearner:
             old_mac_out.append(agent_outs)
         old_mac_out = th.stack(old_mac_out, dim=1)  # Concat over time
         old_pi = old_mac_out
+        # 把mask为0的地方的概率设置为1.0 【数值稳定性的考虑，因为对于无效的动作，其概率值不应该影响后续的计算】
         old_pi[mask == 0] = 1.0
 
+        # 从old_pi中取出对应actions动作的概率 -》[batch_size, max_seq_length+1, num_agents】
         old_pi_taken = th.gather(old_pi, dim=3, index=actions).squeeze(3)
+        # 计算动作概率的对数
         old_log_pi_taken = th.log(old_pi_taken + 1e-10)
 
+        # ppo epoch
         for k in range(self.args.epochs):
+            # 新策略的动作概率 [batch_size, max_seq_length+1, num_agents, action_dim]
             mac_out = []
             self.mac.init_hidden(batch.batch_size)
             for t in range(batch.max_seq_length - 1):
                 agent_outs = self.mac.forward(batch, t=t)
                 mac_out.append(agent_outs)
             mac_out = th.stack(mac_out, dim=1)  # Concat over time
-
             pi = mac_out
+            # 把mask为0的地方的概率设置为1.0 【数值稳定性的考虑，因为对于无效的动作，其概率值不应该影响后续的计算】
+            pi[mask == 0] = 1.0
+
+            # 从old_pi中取出对应actions动作的概率 -》[batch_size, max_seq_length+1, num_agents】
+            pi_taken = th.gather(pi, dim=3, index=actions).squeeze(3)
+            # 计算动作概率的对数
+            log_pi_taken = th.log(pi_taken + 1e-10)
+
+            # 计算advantage
             advantages, critic_train_stats = self.train_critic_sequential(self.critic,
                                                                           self.target_critic,
                                                                           batch,
                                                                           rewards,
                                                                           critic_mask)
             advantages = advantages.detach()
-            # Calculate policy grad with mask
-
-            pi[mask == 0] = 1.0
-
-            pi_taken = th.gather(pi, dim=3, index=actions).squeeze(3)
-            log_pi_taken = th.log(pi_taken + 1e-10)
 
             ratios = th.exp(log_pi_taken - old_log_pi_taken.detach())
             surr1 = ratios * advantages

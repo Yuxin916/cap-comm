@@ -149,7 +149,7 @@ class ParallelRunner:
         final_env_infos = []  # may store extra stats like battle won. this is filled in ORDER OF TERMINATION
 
         while True:
-            # 直到所有滨逊环境都结束就break
+            # 直到所有环境都结束就break
 
             # Pass the entire batch of experiences up till now to the agents
             # Receive the actions for each agent at this timestep in a batch for each un-terminated env
